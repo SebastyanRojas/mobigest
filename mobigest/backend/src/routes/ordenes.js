@@ -2,19 +2,16 @@ const express = require('express');
 const Joi = require('joi');
 const { Op } = require('sequelize');
 const {
-  sequelize, OrdenServicio, Cliente, Dispositivo, Usuario, Repuesto, RepuestoUsado,
+  sequelize, OrdenServicio, Cliente, Dispositivo, Usuario, Repuesto, RepuestoUsado, Mensaje
 } = require('../models');
 const { autenticar, permitirRoles } = require('../middleware/auth');
 const { calcularTotales, generarCodigoOrden } = require('../utils/ordenHelpers');
 const { notificar, notificarAdmins } = require('../utils/notificar');
-
-// 👇 IMPORTAMOS LA FUNCIÓN DEL CORREO 👇
 const { enviarAlertaStock, enviarEncuestaSatisfaccion } = require('../utils/mailer');
 
 const router = express.Router();
 
 // --- 1. RUTA PÚBLICA (Sin autenticación) ---
-// La movemos arriba, antes de router.use(autenticar)
 router.put('/:id/calificar-publico', async (req, res, next) => {
   try {
     const orden = await OrdenServicio.findByPk(req.params.id);
@@ -27,7 +24,6 @@ router.put('/:id/calificar-publico', async (req, res, next) => {
       return res.status(400).json({ error: 'Esta orden ya fue calificada anteriormente.' });
     }
 
-    // Actualizamos la orden con la nota y el comentario
     await orden.update({ 
       calificacion: req.body.calificacion, 
       calificacionComentario: req.body.comentario 
@@ -52,7 +48,6 @@ const ESTADO_LABEL = {
   no_reparable: 'No reparable',
 };
 
-// Esquema usado por el mostrador
 const crearSchemaStaff = Joi.object({
   clienteId: Joi.string().uuid().required(),
   dispositivoId: Joi.string().uuid().required(),
@@ -71,7 +66,6 @@ const crearSchemaStaff = Joi.object({
   })).default([]),
 });
 
-// Esquema usado por el cliente
 const crearSchemaCliente = Joi.object({
   dispositivoId: Joi.string().uuid().required(),
   fallaReportada: Joi.string().min(3).required(),
@@ -98,11 +92,6 @@ const actualizarSchema = Joi.object({
 
 const presupuestoSchema = Joi.object({
   aprobado: Joi.boolean().required(),
-  comentario: Joi.string().allow('', null),
-});
-
-const calificacionSchema = Joi.object({
-  calificacion: Joi.number().integer().min(1).max(5).required(),
   comentario: Joi.string().allow('', null),
 });
 
@@ -245,7 +234,6 @@ router.post('/', async (req, res, next) => {
         );
       }
 
-      // ALERTA DE STOCK
       const nuevoStock = repuesto.stockActual - item.cantidad;
       if (nuevoStock <= 2) {
         enviarAlertaStock({ nombre: repuesto.nombre, stockActual: nuevoStock }).catch(e => console.error("Error envío correo", e));
@@ -271,22 +259,15 @@ router.post('/', async (req, res, next) => {
   }
 });
 
-// ✅ RUTA PRINCIPAL DE ACTUALIZACIÓN
 router.put('/:id', permitirRoles('admin', 'tecnico'), async (req, res, next) => {
-  console.log("--- DEBUG RUTA PUT ---");
-  console.log("ID recibido:", req.params.id);
-  
   const t = await sequelize.transaction();
   try {
     const orden = await OrdenServicio.findByPk(req.params.id, { transaction: t });
     
     if (!orden) {
-      console.log("❌ ORDEN NO ENCONTRADA EN LA BD");
       await t.rollback();
       return res.status(404).json({ error: 'Orden de servicio no encontrada.' });
     }
-    
-    console.log("✅ ORDEN ENCONTRADA:", orden.id);
     
     if (req.usuario.rol === 'tecnico' && orden.usuarioId && orden.usuarioId !== req.usuario.id) {
       await t.rollback();
@@ -344,7 +325,6 @@ router.put('/:id', permitirRoles('admin', 'tecnico'), async (req, res, next) => 
     await orden.update(value, { transaction: t });
     await t.commit();
 
-    // NOTIFICACIONES Y CORREO
     if (value.estado && value.estado !== estadoAnterior) {
       const clienteUsuario = await Usuario.findOne({ where: { clienteId: orden.clienteId } });
       const clienteData = await Cliente.findByPk(orden.clienteId); 
@@ -359,21 +339,13 @@ router.put('/:id', permitirRoles('admin', 'tecnico'), async (req, res, next) => 
         });
       }
 
-      // 👇 EL DISPARADOR DEL CORREO REFORZADO 👇
-    // 👇 EL DISPARADOR DEL CORREO REFORZADO 👇
       if (value.estado === 'entregado') {
         const emailFinal = clienteData?.email || 'sebastyan.rojas@gmail.com'; 
-        
-        // Verificamos si existe el usuario para decirle al mailer si tiene cuenta
         const tieneCuenta = clienteUsuario ? true : false;
         
-        console.log(`\n[MAILER DEBUG] ¡La orden ${orden.id} pasó a Entregado!`);
-        console.log(`[MAILER DEBUG] Intentando enviar encuesta a: ${emailFinal} (Tiene cuenta: ${tieneCuenta})`);
-        
-        // ¡Le pasamos el tercer parámetro (tieneCuenta)!
         enviarEncuestaSatisfaccion(emailFinal, orden, tieneCuenta)
-          .then(() => console.log('✅ [MAILER DEBUG] Correo enviado con éxito a Gmail'))
-          .catch(err => console.error('❌ [MAILER DEBUG] Falló el envío:', err));
+          .then(() => console.log('✅ Correo enviado con éxito a Gmail'))
+          .catch(err => console.error('❌ Falló el envío:', err));
       }
     }
 
@@ -387,7 +359,6 @@ router.put('/:id', permitirRoles('admin', 'tecnico'), async (req, res, next) => 
   }
 });
 
-// PUT /api/v1/ordenes/:id/presupuesto
 router.put('/:id/presupuesto', permitirRoles('cliente'), async (req, res, next) => {
   try {
     const { error, value } = presupuestoSchema.validate(req.body);
@@ -428,34 +399,27 @@ router.put('/:id/presupuesto', permitirRoles('cliente'), async (req, res, next) 
   }
 });
 
-// PUT /api/v1/ordenes/:id/asignar
 router.put('/:id/asignar', permitirRoles('admin', 'tecnico'), async (req, res, next) => {
   try {
     const orden = await OrdenServicio.findByPk(req.params.id);
     if (!orden) return res.status(404).json({ error: 'Orden no encontrada.' });
 
-    // REGLA: Un técnico solo puede intervenir si se la está auto-asignando
     if (req.usuario.rol === 'tecnico') {
-      // 1. No puede asignársela a un técnico distinto a él mismo
       if (req.body.usuarioId && req.body.usuarioId !== req.usuario.id) {
         return res.status(403).json({ error: 'Solo puedes asignarte la orden a ti mismo.' });
       }
-      // 2. No puede robarle la orden a otro técnico que ya la tenga
       if (orden.usuarioId && orden.usuarioId !== req.usuario.id) {
         return res.status(403).json({ error: 'Esta orden ya está asignada a otro técnico.' });
       }
     }
 
-    // Si pasa las reglas, actualizamos el técnico
     await orden.update({ usuarioId: req.body.usuarioId || null });
-    
     res.json({ success: true, message: 'Asignación actualizada correctamente.', orden });
   } catch (error) {
     next(error);
   }
 });
 
-// DELETE /api/v1/ordenes/:id
 router.delete('/:id', permitirRoles('admin'), async (req, res, next) => {
   const t = await sequelize.transaction();
   try {
@@ -475,6 +439,63 @@ router.delete('/:id', permitirRoles('admin'), async (req, res, next) => {
   } catch (err) {
     await t.rollback();
     next(err);
+  }
+});
+
+
+// 👇👇👇 RUTAS CORREGIDAS (AQUÍ ESTÁ LA SOLUCIÓN DEFINITIVA) 👇👇👇
+
+// 1. Ruta para LEER los mensajes
+router.get('/:id/mensajes', permitirRoles('admin', 'tecnico', 'cliente'), async (req, res, next) => {
+  try {
+    const mensajes = await Mensaje.findAll({
+      where: { ordenId: req.params.id },
+      order: [['createdAt', 'ASC']]
+    });
+    res.json(mensajes);
+  } catch (error) {
+    console.error("Error al obtener mensajes:", error);
+    res.status(500).json({ error: 'Error al obtener mensajes' });
+  }
+});
+
+// 2. Ruta para GUARDAR un nuevo mensaje (¡YA TIENE AUTORID Y AUTORROL!)
+router.post('/:id/mensajes', permitirRoles('admin', 'tecnico', 'cliente'), async (req, res, next) => {
+  try {
+    const orden = await OrdenServicio.findByPk(req.params.id);
+    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+
+    // ESTA ES LA MAGIA QUE SOLUCIONA EL ERROR:
+    const nuevoMensaje = await Mensaje.create({
+      ordenId: orden.id,
+      autorId: req.usuario.id,       // Ahora enviamos el autorId que pide la BD
+      autorRol: req.usuario.rol,     // Ahora enviamos el autorRol que pide la BD
+      contenido: req.body.contenido
+    });
+
+    res.status(201).json(nuevoMensaje);
+  } catch (error) {
+    console.error("❌ ERROR AL GUARDAR MENSAJE:", error);
+    res.status(400).json({ error: 'Error al guardar el mensaje', detalle: error.message });
+  }
+});
+
+// 3. Ruta de respaldo para el botón manual de enviar calificación
+router.post('/:id/calificacion', permitirRoles('admin', 'tecnico'), async (req, res, next) => {
+  try {
+    const orden = await OrdenServicio.findByPk(req.params.id, { include: includeCompleto });
+    if (!orden) return res.status(404).json({ error: 'Orden no encontrada' });
+    
+    const clienteUsuario = await Usuario.findOne({ where: { clienteId: orden.clienteId } });
+    const clienteData = await Cliente.findByPk(orden.clienteId); 
+    const emailFinal = clienteData?.email || 'sebastyan.rojas@gmail.com'; 
+    const tieneCuenta = clienteUsuario ? true : false;
+
+    await enviarEncuestaSatisfaccion(emailFinal, orden, tieneCuenta);
+    res.json({ success: true, message: 'Correo enviado correctamente' });
+  } catch (error) {
+    console.error("❌ ERROR AL ENVIAR CORREO MANUAL:", error);
+    res.status(500).json({ error: 'Error interno del servidor al enviar correo' });
   }
 });
 
