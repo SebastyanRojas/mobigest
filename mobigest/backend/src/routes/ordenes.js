@@ -12,7 +12,7 @@ const { enviarAlertaStock, enviarEncuestaSatisfaccion } = require('../utils/mail
 const router = express.Router();
 
 // --- 1. RUTA PÚBLICA (Sin autenticación) ---
-router.put('/:id/calificar-publico', async (req, res, next) => {
+router.put('/:id/calificacion', async (req, res, next) => {
   try {
     const orden = await OrdenServicio.findByPk(req.params.id);
     
