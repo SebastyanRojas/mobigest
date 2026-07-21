@@ -39,7 +39,7 @@ const enviarEncuestaSatisfaccion = async (emailCliente, orden) => {
     const destinatarios = emailCliente ? [emailCliente, emailAdmin] : [emailAdmin];
     
     // Link SIEMPRE público (sin login)
-    const urlEncuesta = `http://localhost:5173/calificar/${orden.id}`;
+    const urlEncuesta = `https://mobigest-mobigest.vercel.app/calificar/${orden.id}`;
 
     const mailOptions = {
       from: `"MobiGest Taller" <${process.env.EMAIL_USER}>`,
