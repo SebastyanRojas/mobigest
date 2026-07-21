@@ -1,5 +1,5 @@
 const nodemailer = require('nodemailer');
-const { generarPDFBuffer } = require('./pdfGenerator'); // Asegúrate de tener este archivo
+// const { generarPDFBuffer } = require('./pdfGenerator'); // <-- DESACTIVADO TEMPORALMENTE PARA LA DEMO
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -31,12 +31,9 @@ const enviarAlertaStock = async (repuesto) => {
   }
 };
 
-// 2. Encuesta + PDF Adjunto
+// 2. Encuesta (SIN PDF POR AHORA PARA EVITAR ERRORES)
 const enviarEncuestaSatisfaccion = async (emailCliente, orden) => {
   try {
-    // Generamos el PDF en memoria
-    const pdfBuffer = await generarPDFBuffer(orden);
-
     // Definimos los destinatarios: Cliente + Tu correo
     const emailAdmin = 'sebastyanandres@gmail.com';
     const destinatarios = emailCliente ? [emailCliente, emailAdmin] : [emailAdmin];
@@ -64,18 +61,19 @@ const enviarEncuestaSatisfaccion = async (emailCliente, orden) => {
           </div>
           <p style="color: #94a3b8; font-size: 12px; text-align: center;">Gracias por confiar en MobiGest.</p>
         </div>
-      `,
-      attachments: [{
-        filename: `Comprobante_${orden.codigo}.pdf`,
-        content: pdfBuffer,
-        contentType: 'application/pdf'
-      }]
+      `
+      // ARCHIVO ADJUNTO DESACTIVADO TEMPORALMENTE
+      // attachments: [{
+      //   filename: `Comprobante_${orden.codigo}.pdf`,
+      //   content: pdfBuffer,
+      //   contentType: 'application/pdf'
+      // }]
     };
     
     await transporter.sendMail(mailOptions);
-    console.log(`[MAILER] Correo y PDF enviado para orden ${orden.codigo} a: ${destinatarios}`);
+    console.log(`✅ [MAILER] ¡ÉXITO! Correo enviado para orden ${orden.codigo} a: ${destinatarios}`);
   } catch (error) {
-    console.error('[MAILER] No se pudo enviar el correo:', error);
+    console.error('❌ [MAILER] No se pudo enviar el correo:', error);
   }
 };
 
